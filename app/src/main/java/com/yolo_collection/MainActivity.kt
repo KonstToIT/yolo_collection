@@ -5,17 +5,26 @@ import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.graphics.drawable.BitmapDrawable
+import android.media.ExifInterface
 import android.os.Bundle
+import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import java.io.File
 import java.io.IOException
+import java.text.SimpleDateFormat
 import java.util.*
+import kotlin.math.min
 
 class MainActivity : AppCompatActivity() {
 
@@ -48,8 +57,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private lateinit var currentPhotoPath: String
+
     private fun takePicture() {
-        // Проверяем наличие разрешений на использование камеры
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -58,53 +68,134 @@ class MainActivity : AppCompatActivity() {
                 arrayOf(Manifest.permission.CAMERA),
                 REQUEST_CAMERA_PERMISSION
             )
-            return
         }
 
-        // Создаем интент для вызова камеры
         val takePictureIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
         if (takePictureIntent.resolveActivity(packageManager) != null) {
-            // Вызываем камеру и ожидаем результата
-            startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE)
+            val photoFile: File? = try {
+                createImageFile()
+
+            }
+            catch (ex: IOException) {
+                // Handle error when creating the temporary file
+                ex.printStackTrace()
+                Log.d("no_cr_file","????")
+                null
+            }
+            Log.d("created_file","successful")
+
+            photoFile?.let {
+                val photoUri = FileProvider.getUriForFile(this, "com.yolo_collection.fileprovider", it)
+                takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoUri)
+                startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE)
+            }
         }
     }
 
-    // Обрабатываем результат вызова камеры
+    @Throws(IOException::class)
+    private fun createImageFile(): File {
+        val timeStamp: String = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val storageDir: File? = getExternalFilesDir(Environment.DIRECTORY_PICTURES)
+        val imageFile = File.createTempFile("JPEG_${timeStamp}_", ".jpg", storageDir)
+        currentPhotoPath = imageFile.absolutePath
+        return imageFile
+    }
+
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
-            val imageBitmap = data?.extras?.get("data") as? Bitmap
-            // Выводим изображение на экран
-            val imageView = findViewById<ImageView>(R.id.Image_view)
-            imageView.setImageBitmap(imageBitmap)
+            // Use currentPhotoPath to access the saved image
+            setPic()
         }
     }
+    private fun setPic() {
+        // Получаем размеры ImageView
+        val imageView = findViewById<ImageView>(R.id.Image_view)
+        val targetW = imageView.width
+        val targetH = imageView.height
 
+        // Получаем размеры изображения
+        val options = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+            BitmapFactory.decodeFile(currentPhotoPath, this)
+            val photoW = outWidth
+            val photoH = outHeight
+
+            // Определяем, насколько нужно масштабировать изображение
+            val scaleFactor = min(photoW / targetW, photoH / targetH)
+
+            // Загружаем изображение с заданным масштабом и ориентацией
+            inJustDecodeBounds = false
+            inSampleSize = scaleFactor
+            inPurgeable = true
+        }
+
+        val bitmap = BitmapFactory.decodeFile(currentPhotoPath, options)
+
+// Поворачиваем изображение, если необходимо
+        val rotatedBitmap = rotateImageIfRequired(bitmap)
+        imageView.setImageBitmap(rotatedBitmap)
+    }
+    private fun rotateImageIfRequired(bitmap: Bitmap): Bitmap {
+        val exifInterface = ExifInterface(currentPhotoPath)
+        val orientation = exifInterface.getAttributeInt(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL
+        )
+        val matrix = Matrix()
+
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(270f)
+        }
+
+        // Поворачиваем изображение
+        return Bitmap.createBitmap(
+            bitmap,
+            0,
+            0,
+            bitmap.width,
+            bitmap.height,
+            matrix,
+            true
+        )
+    }
 
 
 
 
     // Сохраняем изображение в галерее
     private fun saveImage(bitmap: Bitmap) {
-        val filename = "${UUID.randomUUID()}.png"
+        val filename = "${UUID.randomUUID()}.jpg"
+
         val resolver = contentResolver
         val contentValues = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-            put(MediaStore.Images.Media.WIDTH, bitmap.width)
-            put(MediaStore.Images.Media.HEIGHT, bitmap.height)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(MediaStore.Images.Media.IS_PENDING, 1) // Отмечаем, что изображение будет добавлено
         }
 
-        // Сохраняем изображение в галерее
-        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-        uri?.let {
+        // Создаем URI для сохранения изображения в медиахранилище
+        val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val item = resolver.insert(collection, contentValues)
+        item?.let { uri ->
             try {
-                resolver.openOutputStream(it)?.use { outputStream ->
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+                resolver.openOutputStream(uri)?.use { outputStream ->
+                    // Сохраняем оригинальное изображение без масштабирования и сжатия
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
+                    outputStream.flush()
                 }
+
+                // Обновляем медиахранилище для распознавания нового изображения
+                contentValues.clear()
+                contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, contentValues, null, null)
+
                 Toast.makeText(this, "Image saved successfully", Toast.LENGTH_SHORT).show()
             } catch (e: IOException) {
-                resolver.delete(it, null, null)
+                // В случае ошибки удаляем созданную запись из медиахранилища
+                resolver.delete(uri, null, null)
                 Toast.makeText(this, "Failed to save image", Toast.LENGTH_SHORT).show()
             }
         } ?: run {
