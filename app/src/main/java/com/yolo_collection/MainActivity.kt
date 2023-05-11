@@ -3,6 +3,7 @@ package com.yolo_collection
 import android.Manifest
 import android.content.ContentValues
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -31,10 +32,13 @@ class MainActivity : AppCompatActivity() {
     private val REQUEST_CAMERA_PERMISSION = 101
     private val REQUEST_IMAGE_CAPTURE = 102
 
+    private lateinit var currentPhotoPath: String
+    private var isRotationLocked = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
+        lockScreenRotation()
         // Проверяем наличие разрешений на использование камеры
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
@@ -57,9 +61,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private lateinit var currentPhotoPath: String
 
     private fun takePicture() {
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
             != PackageManager.PERMISSION_GRANTED
         ) {
@@ -87,6 +91,7 @@ class MainActivity : AppCompatActivity() {
             photoFile?.let {
                 val photoUri = FileProvider.getUriForFile(this, "com.yolo_collection.fileprovider", it)
                 takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoUri)
+
                 startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE)
             }
         }
@@ -106,6 +111,7 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
             // Use currentPhotoPath to access the saved image
             setPic()
+
         }
     }
     private fun setPic() {
@@ -161,8 +167,17 @@ class MainActivity : AppCompatActivity() {
             true
         )
     }
+    // Блокировка вращения экрана
+    private fun lockScreenRotation() {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        isRotationLocked = true
+    }
 
-
+    // Разблокировка вращения экрана
+    private fun unlockScreenRotation() {
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        isRotationLocked = false
+    }
 
 
     // Сохраняем изображение в галерее
