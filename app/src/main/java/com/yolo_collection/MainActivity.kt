@@ -83,10 +83,8 @@ class MainActivity : AppCompatActivity() {
             catch (ex: IOException) {
                 // Handle error when creating the temporary file
                 ex.printStackTrace()
-                Log.d("no_cr_file","????")
                 null
             }
-            Log.d("created_file","successful")
 
             photoFile?.let {
                 val photoUri = FileProvider.getUriForFile(this, "com.yolo_collection.fileprovider", it)
@@ -138,9 +136,15 @@ class MainActivity : AppCompatActivity() {
 
         val bitmap = BitmapFactory.decodeFile(currentPhotoPath, options)
 
-// Поворачиваем изображение, если необходимо
+        // Поворачиваем изображение, если необходимо
         val rotatedBitmap = rotateImageIfRequired(bitmap)
-        imageView.setImageBitmap(rotatedBitmap)
+
+        // производим сегментацию объектов на изображении
+        var seg = Segmentation("cat.jpg")
+        val segBitmap=seg.segmentImage(rotatedBitmap)
+        // устанавливаем изображение в image_view
+        imageView.setImageBitmap(segBitmap)
+
     }
     private fun rotateImageIfRequired(bitmap: Bitmap): Bitmap {
         val exifInterface = ExifInterface(currentPhotoPath)
